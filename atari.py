@@ -9,27 +9,27 @@ import keras
 import tensorflow as tf
 
 memory = []
-memory_length = 1000000
-no_training_frames = 30000000
+memory_length = 200000
+no_training_frames = 50000000
 training_start = 50000
-learning_rate = 0.00001
+learning_rate = 0.00005
 env = gym.make('BreakoutDeterministic-v4')
 num_of_actions = env.action_space.n
 epsilon = 1
 epsilon_final = 0.1
 render =  False
-exploration_steps =200000
+exploration_steps =100000
 epsilon_decay = (epsilon - epsilon_final)/exploration_steps
 batch_size = 32
 ATARI_SHAPE =[84,84,4]
 alpha = 0.1
 gamma = 0.99
 TAU = 0.01
-
+max_reward = 0
 def create_model():
 
 	model = Sequential()
-	model.add(Conv2D(32, (8, 8), strides=(4, 4), activation='relu',
+	model.add(Conv2D(64, (8, 8), strides=(4, 4), activation='relu',
 	                 input_shape=ATARI_SHAPE))
 	model.add(Conv2D(64, (4, 4), strides=(2, 2), activation='relu'))
 	model.add(Conv2D(64, (3, 3), strides=(1, 1), activation='relu'))
@@ -38,7 +38,7 @@ def create_model():
 	model.add(Dense(num_of_actions))
 	model.summary()
 	optimizer = Adam(learning_rate=learning_rate, beta_1=0.9, beta_2=0.999, amsgrad=False)
-	model.compile(optimizer, loss=tf.keras.losses.Huber(delta=100.0))
+	model.compile(optimizer, loss= tf.keras.losses.Huber(delta=100.0))
 	return model
 
 
@@ -65,10 +65,10 @@ def get_action(present_state = None):
 
 def target_train():
 	model_weights = model.get_weights()
-    target_model_weights = target_model.get_weights()
-    for i in range(len(model_weights)):
-            target_model_weights[i] = TAU * model_weights[i] + (1 - TAU) * target_model_weights[i]
-    target_model.set_weights(target_model_weights)
+	target_model_weights = target_model.get_weights()
+	for i in range(len(model_weights)):
+		target_model_weights[i] = TAU * model_weights[i] + (1 - TAU) * target_model_weights[i]
+	target_model.set_weights(target_model_weights)
 
 
 def train():
@@ -111,6 +111,14 @@ def train():
 	
 	return float(h.history['loss'][0])
 
+def clip_reward(reward):
+    if reward > 0:
+        return 1
+    elif reward == 0:
+        return 0
+    else:
+        return -1
+
 
 def preprocessing(image):
 	image = cv2.cvtColor(image,cv2.COLOR_RGB2GRAY)
@@ -123,7 +131,7 @@ def main():
 	
 	#model = create_model()
  
- 
+	global max_reward
 	i = 0
 	episode = 0
 	while(i < no_training_frames):
@@ -143,17 +151,21 @@ def main():
 			S_t_1  = np.stack((S_t[:,:,0],S_t[:,:,1],S_t[:,:,2],observation),axis= 2)
 			if(len(memory) == memory_length):
 				memory.pop(0)
-			memory.append((S_t,reward,S_t_1,action,done))
+			
 			if(i % 4 == 0):
 				loss.append(train())
 				target_train()
 			episode_reward += reward
+			clipreward = clip_reward(reward)
+			memory.append((S_t,clipreward,S_t_1,action,done))
 			S_t = S_t_1
 		episode = episode + 1
+		if(max_reward < episode_reward):
+			max_reward = episode_reward
 		avg_loss = np.mean(np.asarray(loss,np.float32))
-		print("episode no:",episode,"Frame No:",i,"episode_reward:",episode_reward,"epsilon:",epsilon,"memory length:",len(memory),"avg loss:",avg_loss)
-		if(i % 200 ==0 and i > 100):
-			model.save('atari_'+str(i))
+		print("episode no:",episode,"Frame No:",i,"episode_reward:",episode_reward,"epsilon:",epsilon,"memory length:",len(memory),"avg loss:",avg_loss,"max_reward:",max_reward,flush=True)
+		if(episode % 200 ==0 and episode > 0):
+			model.save('atari_'+str(episode))
 
 main()
 
